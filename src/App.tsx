@@ -91,6 +91,51 @@ const FastScrollHandle = () => {
   const [scrollProgress, setScrollProgress] = useState(0);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // 1. Обработка движения
+  const updateScroll = (clientY: number) => {
+    if (!containerRef.current) return;
+    
+    const rect = containerRef.current.getBoundingClientRect();
+    // Вычисляем позицию внутри контейнера (от 0 до 1)
+    const y = Math.max(0, Math.min(clientY - rect.top, rect.height));
+    const progress = y / rect.height;
+    
+    setScrollProgress(progress);
+    
+    const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
+    window.scrollTo({
+      top: progress * totalHeight,
+      behavior: 'auto' // 'auto' важен для мгновенного отклика без задержек
+    });
+  };
+
+  // 2. Глобальные слушатели при перетаскивании
+  useEffect(() => {
+    if (!isDragging) return;
+
+    const onPointerMove = (e: PointerEvent) => {
+      // Предотвращаем любые другие действия
+      if (e.cancelable) e.preventDefault();
+      updateScroll(e.clientY);
+    };
+
+    const onPointerUp = () => {
+      setIsDragging(false);
+      document.body.style.userSelect = ''; // Возвращаем возможность выделять текст
+    };
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, [isDragging]);
+
+  // 3. Синхронизация ползунка со скроллом (когда крутим просто пальцем по сайту)
   useEffect(() => {
     const handleScroll = () => {
       if (isDragging) return;
@@ -99,61 +144,39 @@ const FastScrollHandle = () => {
       setScrollProgress(window.scrollY / totalHeight);
     };
 
-    window.addEventListener('scroll', handleScroll);
+    window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, [isDragging]);
 
-  const handlePointerMove = (e: React.PointerEvent | PointerEvent) => {
-    if (!isDragging || !containerRef.current) return;
-    
-    const rect = containerRef.current.getBoundingClientRect();
-    const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
-    const progress = y / rect.height;
-    
-    setScrollProgress(progress);
-    
-    const totalHeight = document.documentElement.scrollHeight - window.innerHeight;
-    window.scrollTo({
-      top: progress * totalHeight,
-      behavior: 'auto'
-    });
-  };
-
-  const handlePointerDown = (e: React.PointerEvent) => {
+  const onPointerDown = (e: React.PointerEvent) => {
     setIsDragging(true);
-    (e.target as HTMLElement).setPointerCapture(e.pointerId);
-    handlePointerMove(e);
-  };
-
-  const handlePointerUp = (e: React.PointerEvent) => {
-    setIsDragging(false);
-    (e.target as HTMLElement).releasePointerCapture(e.pointerId);
+    document.body.style.userSelect = 'none'; // Чтобы не выделялся текст при скролле
+    updateScroll(e.clientY);
   };
 
   return (
     <div 
       ref={containerRef}
-      className="fixed right-0 top-16 bottom-16 w-8 z-[100] md:hidden flex flex-col items-center pointer-events-none"
+      // touch-none — КЛЮЧЕВОЙ КЛАСС. Отключает системный скролл поверх этой области.
+      className="fixed right-0 top-20 bottom-20 w-12 z-[100] md:hidden flex flex-col items-center touch-none select-none"
+      onPointerDown={onPointerDown}
     >
-      <div className="relative w-full h-full flex justify-center">
-        {/* Track background for visibility */}
-        <div className="absolute w-0.5 h-full bg-stone-200/20 rounded-full" />
+      <div className="relative w-full h-full flex justify-center pointer-events-none">
+        {/* Трек (линия) */}
+        <div className="absolute w-0.5 h-full bg-stone-300/30 rounded-full" />
         
+        {/* Ползунок */}
         <motion.div
-          className="absolute w-1.5 h-16 bg-amber-500/60 backdrop-blur-md rounded-full pointer-events-auto cursor-grab active:cursor-grabbing shadow-lg border border-white/20"
+          className="absolute w-2.5 h-20 bg-amber-500/90 backdrop-blur-md rounded-full pointer-events-auto shadow-xl border border-white/30"
           style={{ 
             top: `${scrollProgress * 100}%`,
-            translateY: '-50%'
+            translateY: '-50%' 
           }}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
           animate={{
-            scaleX: isDragging ? 3 : 1,
-            scaleY: isDragging ? 1.5 : 1,
-            backgroundColor: isDragging ? 'rgba(245, 158, 11, 0.9)' : 'rgba(245, 158, 11, 0.6)',
+            width: isDragging ? 12 : 8,
+            backgroundColor: isDragging ? '#f59e0b' : '#d97706',
           }}
-          transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+          transition={{ type: 'spring', stiffness: 400, damping: 30 }}
         />
       </div>
     </div>
@@ -255,7 +278,10 @@ const Hero = () => {
     <section className="relative h-[85vh] min-h-[600px] flex items-center justify-center overflow-hidden">
       <div 
         className="absolute inset-0 bg-cover bg-center bg-no-repeat scale-105"
-        style={{ backgroundImage: 'url("/background.jpg")', filter: 'blur(2px) brightness(1.15)' }}
+        style={{ 
+          backgroundImage: `url("${import.meta.env.BASE_URL}background.jpg")`, 
+          filter: 'blur(2px) brightness(1.15)' 
+        }}
       />
       <div className="absolute inset-0 bg-stone-900/25" />
       
@@ -500,7 +526,7 @@ const Catalog = () => {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <img 
-                    src={${import.meta.env.BASE_URL}${selectedId}.jpg}
+                    src={`${import.meta.env.BASE_URL}${selectedId}.jpg`}
                     className="max-w-full max-h-[80vh] object-contain rounded-xl shadow-2xl pointer-events-none"
                     referrerPolicy="no-referrer"
                   />
@@ -526,6 +552,12 @@ const Reviews = () => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [zoomScale, setZoomScale] = useState(1);
+  const pinchState = useRef<{
+    initialDistance: number;
+    initialScale: number;
+  } | null>(null);
+  const [isZoomed, setIsZoomed] = useState(false);
 
   const resetTimeout = () => {
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
@@ -569,6 +601,58 @@ const Reviews = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [fullscreenIndex]);
+
+  useEffect(() => {
+    if (fullscreenIndex === null) {
+      setZoomScale(1);
+      setIsZoomed(false);
+      pinchState.current = null;
+    }
+  }, [fullscreenIndex]);
+
+  const handlePinchStart = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (e.touches.length !== 2) return;
+
+    const [t1, t2] = [e.touches[0], e.touches[1]];
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    const distance = Math.hypot(dx, dy);
+
+    pinchState.current = {
+      initialDistance: distance,
+      initialScale: zoomScale,
+    };
+  };
+
+  const handlePinchMove = (e: React.TouchEvent<HTMLDivElement>) => {
+    if (!pinchState.current || e.touches.length !== 2) return;
+
+    e.preventDefault();
+
+    const [t1, t2] = [e.touches[0], e.touches[1]];
+    const dx = t2.clientX - t1.clientX;
+    const dy = t2.clientY - t1.clientY;
+    const distance = Math.hypot(dx, dy);
+
+    if (pinchState.current.initialDistance === 0) return;
+
+    let nextScale =
+      (distance / pinchState.current.initialDistance) *
+      pinchState.current.initialScale;
+
+    nextScale = Math.min(Math.max(nextScale, 1), 3);
+
+    setZoomScale(nextScale);
+    setIsZoomed(nextScale > 1.01);
+  };
+
+  const handlePinchEnd = () => {
+    pinchState.current = null;
+    if (zoomScale <= 1.01) {
+      setZoomScale(1);
+      setIsZoomed(false);
+    }
+  };
 
   return (
     <section id="reviews" className="py-16 overflow-hidden">
@@ -632,7 +716,11 @@ const Reviews = () => {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             className="fixed inset-0 z-[110] bg-black/95 flex items-center justify-center p-4 md:p-8"
-            onClick={() => setFullscreenIndex(null)}
+            onClick={() => {
+              setFullscreenIndex(null);
+              setZoomScale(1);     // Сбрасываем масштаб до обычного
+              setIsZoomed(false);  // Выключаем режим зума
+            }}
           >
             <button className="absolute top-6 right-6 text-white p-2 hover:bg-white/10 rounded-full transition-colors z-[120]">
               <X size={32} />
@@ -670,7 +758,7 @@ const Reviews = () => {
                   animate={{ opacity: 1, x: 0 }}
                   exit={{ opacity: 0, x: -50 }}
                   transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-                  drag="x"
+                  drag={isZoomed ? false : "x"}
                   dragConstraints={{ left: 0, right: 0 }}
                   dragElastic={0.2}
                   onDragEnd={(_, info) => {
@@ -680,12 +768,26 @@ const Reviews = () => {
                   className="w-full h-full flex items-center justify-center"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  <div className="relative w-full h-full flex items-center justify-center">
-                    <img 
-                      src={`${import.meta.env.BASE_URL}${REVIEWS[fullscreenIndex]}otz.jpg`}
-                      className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl pointer-events-none"
-                      referrerPolicy="no-referrer"
-                    />
+                  <div
+                    className="relative w-full h-full flex items-center justify-center touch-none"
+                    onTouchStart={handlePinchStart}
+                    onTouchMove={handlePinchMove}
+                    onTouchEnd={handlePinchEnd}
+                    onTouchCancel={handlePinchEnd}
+                  >
+                    <motion.img 
+  src={`${import.meta.env.BASE_URL}${REVIEWS[fullscreenIndex]}otz.jpg`}
+  className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl"
+  // Заменяем обычный transform на motion-scale
+  animate={{ scale: zoomScale }} 
+  // Включаем перетаскивание, только если картинка увеличена
+  drag={isZoomed} 
+  // Ограничиваем, чтобы картинка не улетала слишком далеко за экран
+  dragConstraints={{ left: -200, right: 200, top: -200, bottom: 200 }}
+  dragElastic={0.1}
+  transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+  referrerPolicy="no-referrer"
+/>
                   </div>
                 </motion.div>
               </AnimatePresence>
